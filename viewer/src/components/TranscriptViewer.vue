@@ -68,8 +68,14 @@ function startEdit(i: number) {
 function commitEdit() {
   const i = editingIdx.value
   if (i < 0) return
+  const el = document.getElementById(`edit-${i}`) as HTMLInputElement | null
+  if (!el) {
+    editingIdx.value = -1
+    editText.value = ''
+    return
+  }
   const w = words.value[i]
-  const trimmed = editText.value.trim()
+  const trimmed = el.value.trim()
   if (!trimmed) {
     editingIdx.value = -1
     editText.value = ''
