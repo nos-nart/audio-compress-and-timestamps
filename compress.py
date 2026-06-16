@@ -5,7 +5,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from faster_whisper import WhisperModel
+try:
+    from faster_whisper import WhisperModel
+except ImportError:
+    print(
+        "Error: faster-whisper not found. Install it:\n"
+        "  pip install faster-whisper",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
@@ -54,6 +62,10 @@ def check_ffmpeg() -> None:
 
 
 def compress_audio(input_path: Path, output_dir: Path) -> Path:
+    if input_path.suffix.lower() in (".ogg", ".opus"):
+        print(f"  Input is already Opus/OGG, skipping compression")
+        return input_path
+
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = input_path.stem
     output_path = output_dir / f"{stem}.ogg"
@@ -86,12 +98,25 @@ def compress_audio(input_path: Path, output_dir: Path) -> Path:
 
 def transcribe_audio(audio_path: Path, model_name: str = "base", language: str | None = None) -> tuple[list[dict], float]:
     print(f"  Loading whisper model: {model_name}")
-    model = WhisperModel(model_name, device="cpu", compute_type="int8")
+    try:
+        model = WhisperModel(model_name, device="cpu", compute_type="int8")
+    except Exception as e:
+        print(f"Error: failed to load whisper model '{model_name}': {e}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"  Transcribing: {audio_path}")
-    segments, info = model.transcribe(str(audio_path), beam_size=5, language=language)
+    try:
+        segments, info = model.transcribe(str(audio_path), beam_size=5, language=language)
+    except Exception as e:
+        print(f"Error: transcription failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
     duration = round(info.duration, 2) if info.duration else 0
+
+    if duration < 0.1:
+        print("  Warning: audio too short (< 0.1s), skipping transcription")
+        return [], duration
+
     result = []
     for seg in segments:
         result.append({
@@ -113,8 +138,12 @@ def write_transcription(segments: list[dict], duration: float, input_path: Path,
         "segments": segments,
     }
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    try:
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except (OSError, json.JSONEncodeError) as e:
+        print(f"Error: failed to write transcription: {e}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"  Transcription saved: {output_path}")
 
