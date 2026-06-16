@@ -67,13 +67,28 @@ function commitEdit() {
   const i = editingIdx.value
   if (i < 0) return
   const w = words.value[i]
-  const seg = localSegments.value[w.segIdx]
   const trimmed = editText.value.trim()
-  if (trimmed && trimmed !== seg.words[w.wordIdx].word) {
-    seg.words[w.wordIdx].word = trimmed
-    seg.text = seg.words.map(w => w.word).join(' ')
-    emit('update', localSegments.value)
+  if (!trimmed) {
+    editingIdx.value = -1
+    editText.value = ''
+    return
   }
+
+  const updated = localSegments.value.map((seg, si) => {
+    if (si !== w.segIdx) return seg
+    return {
+      ...seg,
+      words: seg.words.map((word, wi) =>
+        wi === w.wordIdx ? { ...word, word: trimmed } : word
+      ),
+      text: seg.words.map((word, wi) =>
+        wi === w.wordIdx ? trimmed : word.word
+      ).join(' '),
+    }
+  })
+
+  localSegments.value = updated
+  emit('update', updated)
   editingIdx.value = -1
   editText.value = ''
 }
