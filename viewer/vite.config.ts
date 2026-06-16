@@ -6,11 +6,30 @@ import path from 'path'
 
 const outputDir = path.resolve(import.meta.dirname, '../output')
 
-function serveFile(res: any, filePath: string, mime: string) {
+function serveFile(req: any, res: any, filePath: string, mime: string) {
   try {
-    const data = fs.readFileSync(filePath)
+    const stat = fs.statSync(filePath)
+    res.setHeader('Accept-Ranges', 'bytes')
     res.setHeader('Content-Type', mime)
-    res.end(data)
+
+    const range = req.headers?.range
+    if (range) {
+      const match = range.match(/bytes=(\d+)-(\d*)/)
+      if (match) {
+        const start = Number(match[1])
+        const end = match[2] ? Number(match[2]) : stat.size - 1
+        const chunkSize = end - start + 1
+        const stream = fs.createReadStream(filePath, { start, end })
+        res.statusCode = 206
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`)
+        res.setHeader('Content-Length', chunkSize)
+        stream.pipe(res)
+        return
+      }
+    }
+
+    res.setHeader('Content-Length', stat.size)
+    fs.createReadStream(filePath).pipe(res)
   } catch {
     res.statusCode = 404
     res.end('Not found')
@@ -55,7 +74,7 @@ export default defineConfig({
             '.opus': 'audio/ogg',
             '.json': 'application/json',
           }
-          serveFile(res, filePath, mime[ext] || 'application/octet-stream')
+          serveFile(req, res, filePath, mime[ext] || 'application/octet-stream')
         })
       },
     },
