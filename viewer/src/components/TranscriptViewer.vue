@@ -29,10 +29,12 @@ const emit = defineEmits<{
   update: [segments: Segment[]]
 }>()
 
-const localSegments = ref<Segment[]>([])
+const localSegments = ref<Segment[]>(props.segments)
 watch(() => props.segments, (s) => {
-  localSegments.value = s
-}, { immediate: true })
+  if (s !== localSegments.value) {
+    localSegments.value = s
+  }
+}, { flush: 'post' })
 
 const words = computed(() => {
   return localSegments.value.flatMap((s, si) =>
