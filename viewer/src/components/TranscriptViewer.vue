@@ -31,7 +31,7 @@ const emit = defineEmits<{
 
 const localSegments = ref<Segment[]>([])
 watch(() => props.segments, (s) => {
-  localSegments.value = JSON.parse(JSON.stringify(s))
+  localSegments.value = s
 }, { immediate: true })
 
 const words = computed(() => {
