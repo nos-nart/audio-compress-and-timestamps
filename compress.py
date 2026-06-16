@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
+
+from faster_whisper import WhisperModel
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
@@ -71,6 +74,41 @@ def compress_audio(input_path: Path, output_dir: Path) -> Path:
     return output_path
 
 
+def transcribe_audio(audio_path: Path, model_name: str = "base") -> tuple[list[dict], float]:
+    print(f"  Loading whisper model: {model_name}")
+    model = WhisperModel(model_name, device="cpu", compute_type="int8")
+
+    print(f"  Transcribing: {audio_path}")
+    segments, info = model.transcribe(str(audio_path), beam_size=5)
+
+    duration = round(info.duration, 2) if info.duration else 0
+    result = []
+    for seg in segments:
+        result.append({
+            "start": round(seg.start, 2),
+            "end": round(seg.end, 2),
+            "text": seg.text.strip(),
+        })
+    return result, duration
+
+
+def write_transcription(segments: list[dict], duration: float, input_path: Path, output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stem = input_path.stem
+    output_path = output_dir / f"{stem}.json"
+
+    data = {
+        "file": input_path.name,
+        "duration_sec": duration,
+        "segments": segments,
+    }
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+    print(f"  Transcription saved: {output_path}")
+
+
 def main() -> None:
     args = parse_args()
     try:
@@ -82,8 +120,13 @@ def main() -> None:
     check_ffmpeg()
 
     audio_output_dir = Path("output/audio")
+    transcription_output_dir = Path("output/transcription")
+
     compressed = compress_audio(input_path, audio_output_dir)
-    print(f"Compressed: {compressed}")
+    segments, duration = transcribe_audio(compressed)
+    write_transcription(segments, duration, input_path, transcription_output_dir)
+
+    print("Done.")
 
 
 if __name__ == "__main__":
