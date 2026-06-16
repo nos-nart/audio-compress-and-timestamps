@@ -29,6 +29,8 @@ const transcription = ref<Transcription | null>(null)
 const currentTime = ref(0)
 const playerRef = ref<any>(null)
 const loading = ref(false)
+const saving = ref(false)
+const saveMsg = ref('')
 const error = ref('')
 const dark = ref(true)
 
@@ -60,7 +62,11 @@ onMounted(async () => {
   try {
     const res = await fetch('/api/list-recordings')
     recordings.value = await res.json()
-    if (recordings.value.length > 0) {
+    const params = new URLSearchParams(window.location.search)
+    const initial = params.get('recording')
+    if (initial && recordings.value.includes(initial)) {
+      selectRecording(initial)
+    } else if (recordings.value.length > 0) {
       selectRecording(recordings.value[0])
     }
   } catch {
@@ -70,8 +76,13 @@ onMounted(async () => {
 
 async function selectRecording(name: string) {
   selected.value = name
+  const url = new URL(window.location.href)
+  url.searchParams.set('recording', name)
+  window.history.replaceState({}, '', url.toString())
   loading.value = true
   error.value = ''
+  saveMsg.value = ''
+  saving.value = false
   audioUrl.value = `/output/audio/${name}.ogg`
   try {
     const res = await fetch(`/output/transcription/${name}.json`)
@@ -90,6 +101,31 @@ function onTimeUpdate(time: number) {
 function onSeek(time: number) {
   playerRef.value?.seek(time)
 }
+
+function onUpdateSegments(segments: Segment[]) {
+  if (!transcription.value) return
+  transcription.value.segments = segments
+  saveMsg.value = ''
+  onSave()
+}
+
+async function onSave() {
+  if (!transcription.value || saving.value) return
+  saving.value = true
+  try {
+    const res = await fetch('/api/save-transcription', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(transcription.value),
+    })
+    const data = await res.json()
+    saveMsg.value = data.ok ? 'saved' : 'save failed'
+    if (data.ok) setTimeout(() => { if (saveMsg.value === 'saved') saveMsg.value = '' }, 2000)
+  } catch {
+    saveMsg.value = 'save failed'
+  }
+  saving.value = false
+}
 </script>
 
 <template>
@@ -100,6 +136,7 @@ function onSeek(time: number) {
           transcription viewer
         </h1>
         <div class="flex items-center gap-3">
+          <span v-if="saveMsg" class="text-xs text-gray-500 dark:text-gray-400">{{ saveMsg }}</span>
           <select
             v-model="selected"
             @change="selectRecording(selected)"
@@ -130,6 +167,7 @@ function onSeek(time: number) {
           :segments="transcription.segments"
           :current-time="currentTime"
           @seek="onSeek"
+          @update="onUpdateSegments"
         />
       </template>
     </div>

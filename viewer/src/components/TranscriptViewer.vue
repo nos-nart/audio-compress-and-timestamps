@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 
 interface Word {
   start: number
@@ -14,15 +14,30 @@ interface Segment {
   words: Word[]
 }
 
+interface WordRef extends Word {
+  segIdx: number
+  wordIdx: number
+}
+
 const props = defineProps<{
   segments: Segment[]
   currentTime: number
 }>()
 
-const emit = defineEmits<{ seek: [time: number] }>()
+const emit = defineEmits<{
+  seek: [time: number]
+  update: [segments: Segment[]]
+}>()
+
+const localSegments = ref<Segment[]>([])
+watch(() => props.segments, (s) => {
+  localSegments.value = JSON.parse(JSON.stringify(s))
+}, { immediate: true })
 
 const words = computed(() => {
-  return props.segments.flatMap(s => s.words)
+  return localSegments.value.flatMap((s, si) =>
+    s.words.map((w, wi) => ({ ...w, segIdx: si, wordIdx: wi }))
+  )
 })
 
 const activeIndex = computed(() => {
@@ -35,19 +50,61 @@ const pastCount = computed(() => {
   return words.value.filter(w => w.end * 1000 <= t).length
 })
 
-function wordClass(i: number): string {
-  const pc = pastCount.value
-  if (i < pc) {
-    return 'text-gray-400 dark:text-gray-500'
-  }
-  if (i === activeIndex.value) {
-    return 'text-emerald-600 dark:text-emerald-400'
-  }
-  return 'text-gray-500 dark:text-gray-400'
+const editingIdx = ref(-1)
+const editText = ref('')
+
+function startEdit(i: number) {
+  editingIdx.value = i
+  editText.value = words.value[i].word
+  nextTick(() => {
+    const el = document.getElementById(`edit-${i}`) as HTMLInputElement | null
+    el?.focus()
+    el?.select()
+  })
 }
 
-function onClickWord(w: Word) {
+function commitEdit() {
+  const i = editingIdx.value
+  if (i < 0) return
+  const w = words.value[i]
+  const seg = localSegments.value[w.segIdx]
+  const trimmed = editText.value.trim()
+  if (trimmed && trimmed !== seg.words[w.wordIdx].word) {
+    seg.words[w.wordIdx].word = trimmed
+    seg.text = seg.words.map(w => w.word).join(' ')
+    emit('update', localSegments.value)
+  }
+  editingIdx.value = -1
+  editText.value = ''
+}
+
+function cancelEdit() {
+  editingIdx.value = -1
+  editText.value = ''
+}
+
+function wordClass(i: number): string[] {
+  const pc = pastCount.value
+  const cls = ['inline-block', 'cursor-pointer', 'mr-1.5', 'transition-colors', 'duration-75', 'rounded', 'px-0.5', '-mx-0.5']
+  if (i < pc) cls.push('text-gray-400', 'dark:text-gray-500')
+  else if (i === activeIndex.value) cls.push('text-emerald-600', 'dark:text-emerald-400')
+  else cls.push('text-gray-500', 'dark:text-gray-400')
+  if (editingIdx.value !== i) cls.push('hover:bg-gray-100', 'dark:hover:bg-gray-800')
+  return cls
+}
+
+function onClickWord(w: WordRef) {
+  if (editingIdx.value >= 0) commitEdit()
   emit('seek', w.start)
+}
+
+function onDblClickWord(i: number) {
+  startEdit(i)
+}
+
+function onEditKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') { e.preventDefault(); commitEdit() }
+  if (e.key === 'Escape') { e.preventDefault(); cancelEdit() }
 }
 </script>
 
@@ -56,10 +113,26 @@ function onClickWord(w: Word) {
     <div v-if="words.length > 0" class="leading-relaxed text-lg font-serif" style="font-family:var(--font-body)">
       <span
         v-for="(w, i) in words"
-        :key="i"
-        @click="onClickWord(w)"
-        :class="[wordClass(i), 'inline-block cursor-pointer mr-1.5 transition-colors duration-75 rounded hover:bg-gray-100 dark:hover:bg-gray-800 px-0.5 -mx-0.5']"
-      >{{ w.word }}</span>
+        :key="`${w.segIdx}-${w.wordIdx}`"
+        class="inline-block mr-1.5 relative"
+      >
+        <span
+          v-if="editingIdx !== i"
+          @click="onClickWord(w)"
+          @dblclick="onDblClickWord(i)"
+          :class="wordClass(i)"
+        >{{ w.word }}</span>
+        <input
+          v-else
+          :id="`edit-${i}`"
+          v-model="editText"
+          :size="Math.max(editText.length + 2, 5)"
+          @blur="commitEdit"
+          @keydown="onEditKeydown"
+          class="outline-none border-b-2 border-emerald-500 bg-transparent text-emerald-600 dark:text-emerald-400 font-sans text-lg"
+          style="font-family:var(--font-ui)"
+        />
+      </span>
     </div>
     <p v-else class="text-gray-400 dark:text-gray-500 text-sm text-center py-8">
       {{ segments.length > 0 ? 'No word-level timestamps in this transcription' : 'No segments in this transcription' }}

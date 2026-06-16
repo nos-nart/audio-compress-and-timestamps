@@ -63,6 +63,28 @@ export default defineConfig({
             }
             return
           }
+
+          if (req.url === '/save-transcription' && req.method === 'POST') {
+            let body = ''
+            req.on('data', (chunk: string) => { body += chunk })
+            req.on('end', () => {
+              try {
+                const data = JSON.parse(body)
+                const transDir = path.join(outputDir, 'transcription')
+                fs.mkdirSync(transDir, { recursive: true })
+                const stem = path.parse(data.file).name
+                const filePath = path.join(transDir, `${stem}.json`)
+                fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ ok: true }))
+              } catch {
+                res.statusCode = 400
+                res.end(JSON.stringify({ ok: false, error: 'save failed' }))
+              }
+            })
+            return
+          }
+
           next()
         })
 
