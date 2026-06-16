@@ -1,0 +1,9 @@
+.venv/
+node_modules/
+dist/
+
+input/
+output/
+
+viewer/dist/
+viewer/node_modules/

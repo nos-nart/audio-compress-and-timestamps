@@ -1,19 +1,11 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import subprocess
 import sys
+import warnings
 from pathlib import Path
-
-try:
-    from faster_whisper import WhisperModel
-except ImportError:
-    print(
-        "Error: faster-whisper not found. Install it:\n"
-        "  pip install faster-whisper",
-        file=sys.stderr,
-    )
-    sys.exit(1)
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
@@ -26,9 +18,15 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Input audio filename (must exist in input/ directory)",
     )
     parser.add_argument(
+        "--engine",
+        default="faster-whisper",
+        choices=["faster-whisper", "whisperx"],
+        help="Transcription backend (default: faster-whisper)",
+    )
+    parser.add_argument(
         "--model",
         default="base",
-        help="Whisper model size: tiny, base, small, medium, large-v3 (default: base)",
+        help="Whisper model size or HF model ID (default: base)",
     )
     parser.add_argument(
         "--language",
@@ -96,8 +94,18 @@ def compress_audio(input_path: Path, output_dir: Path) -> Path:
     return output_path
 
 
-def transcribe_audio(audio_path: Path, model_name: str = "base", language: str | None = None) -> tuple[list[dict], float]:
-    print(f"  Loading whisper model: {model_name}")
+def transcribe_faster_whisper(audio_path: Path, model_name: str, language: str | None) -> tuple[list[dict], float]:
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        print(
+            "Error: faster-whisper not found. Install it:\n"
+            "  pip install faster-whisper",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"  Loading faster-whisper model: {model_name}")
     try:
         model = WhisperModel(model_name, device="cpu", compute_type="int8")
     except Exception as e:
@@ -106,7 +114,10 @@ def transcribe_audio(audio_path: Path, model_name: str = "base", language: str |
 
     print(f"  Transcribing: {audio_path}")
     try:
-        segments, info = model.transcribe(str(audio_path), beam_size=5, language=language)
+        segments, info = model.transcribe(
+            str(audio_path), beam_size=5, language=language,
+            word_timestamps=True,
+        )
     except Exception as e:
         print(f"Error: transcription failed: {e}", file=sys.stderr)
         sys.exit(1)
@@ -119,12 +130,98 @@ def transcribe_audio(audio_path: Path, model_name: str = "base", language: str |
 
     result = []
     for seg in segments:
+        words = []
+        if seg.words:
+            for w in seg.words:
+                words.append({
+                    "start": round(w.start, 2),
+                    "end": round(w.end, 2),
+                    "word": w.word.strip(),
+                })
         result.append({
             "start": round(seg.start, 2),
             "end": round(seg.end, 2),
             "text": seg.text.strip(),
+            "words": words,
         })
     return result, duration
+
+
+def transcribe_whisperx(audio_path: Path, model_name: str, language: str | None) -> tuple[list[dict], float]:
+    warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
+    try:
+        import whisperx
+    except ImportError:
+        print(
+            "Error: whisperx not found. Install it:\n"
+            "  pip install whisperx",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"  Loading whisperx model: {model_name}")
+    device = "cpu"
+    try:
+        model = whisperx.load_model(model_name, device=device, compute_type="int8")
+    except Exception as e:
+        print(f"Error: failed to load whisperx model '{model_name}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"  Loading audio: {audio_path}")
+    try:
+        audio = whisperx.load_audio(str(audio_path))
+    except Exception as e:
+        print(f"Error: failed to load audio: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"  Transcribing: {audio_path}")
+    try:
+        result = model.transcribe(audio, batch_size=16, language=language)
+    except Exception as e:
+        print(f"Error: transcription failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    lang = result.get("language", language or "en")
+    print(f"  Aligning word timestamps (language: {lang})")
+    try:
+        align_model, metadata = whisperx.load_align_model(language_code=lang, device=device)
+        result = whisperx.align(
+            result["segments"], align_model, metadata, audio,
+            device=device, return_char_alignments=False,
+        )
+    except Exception as e:
+        print(f"  Warning: alignment failed ({e}), using raw segments")
+
+    duration = round(max(s["end"] for s in result["segments"]), 2) if result["segments"] else 0
+
+    if duration < 0.1:
+        print("  Warning: audio too short (< 0.1s), skipping transcription")
+        return [], duration
+
+    segments_out = []
+    for seg in result["segments"]:
+        words = []
+        for w in seg.get("words", []):
+            ws = w.get("start")
+            we = w.get("end")
+            word = w.get("word", "").strip()
+            if ws is not None and we is not None and word:
+                words.append({
+                    "start": round(ws, 2),
+                    "end": round(we, 2),
+                    "word": word,
+                })
+        text = seg.get("text", "").strip()
+        ss = seg.get("start")
+        se = seg.get("end")
+        if ss is not None and se is not None:
+            segments_out.append({
+                "start": round(ss, 2),
+                "end": round(se, 2),
+                "text": text,
+                "words": words,
+            })
+    return segments_out, duration
 
 
 def write_transcription(segments: list[dict], duration: float, input_path: Path, output_dir: Path) -> None:
@@ -148,8 +245,19 @@ def write_transcription(segments: list[dict], duration: float, input_path: Path,
     print(f"  Transcription saved: {output_path}")
 
 
+BACKENDS = {
+    "faster-whisper": transcribe_faster_whisper,
+    "whisperx": transcribe_whisperx,
+}
+
+
 def main() -> None:
     args = parse_args()
+
+    lang = args.language or "auto"
+    print(f"[audio-tool] file={args.file} engine={args.engine} model={args.model} language={lang}")
+    print()
+
     try:
         input_path = validate_input(args.file)
     except FileNotFoundError as e:
@@ -162,7 +270,8 @@ def main() -> None:
     transcription_output_dir = Path("output/transcription")
 
     compressed = compress_audio(input_path, audio_output_dir)
-    segments, duration = transcribe_audio(compressed, model_name=args.model, language=args.language)
+    transcribe = BACKENDS[args.engine]
+    segments, duration = transcribe(compressed, model_name=args.model, language=args.language)
     write_transcription(segments, duration, input_path, transcription_output_dir)
 
     print("Done.")
