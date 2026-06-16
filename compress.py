@@ -17,6 +17,16 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         required=True,
         help="Input audio filename (must exist in input/ directory)",
     )
+    parser.add_argument(
+        "--model",
+        default="base",
+        help="Whisper model size: tiny, base, small, medium, large-v3 (default: base)",
+    )
+    parser.add_argument(
+        "--language",
+        default=None,
+        help="Language code (e.g., 'en'). Auto-detected if not set.",
+    )
     return parser.parse_args(args)
 
 
@@ -74,12 +84,12 @@ def compress_audio(input_path: Path, output_dir: Path) -> Path:
     return output_path
 
 
-def transcribe_audio(audio_path: Path, model_name: str = "base") -> tuple[list[dict], float]:
+def transcribe_audio(audio_path: Path, model_name: str = "base", language: str | None = None) -> tuple[list[dict], float]:
     print(f"  Loading whisper model: {model_name}")
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
 
     print(f"  Transcribing: {audio_path}")
-    segments, info = model.transcribe(str(audio_path), beam_size=5)
+    segments, info = model.transcribe(str(audio_path), beam_size=5, language=language)
 
     duration = round(info.duration, 2) if info.duration else 0
     result = []
@@ -123,7 +133,7 @@ def main() -> None:
     transcription_output_dir = Path("output/transcription")
 
     compressed = compress_audio(input_path, audio_output_dir)
-    segments, duration = transcribe_audio(compressed)
+    segments, duration = transcribe_audio(compressed, model_name=args.model, language=args.language)
     write_transcription(segments, duration, input_path, transcription_output_dir)
 
     print("Done.")
