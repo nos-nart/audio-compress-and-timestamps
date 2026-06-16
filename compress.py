@@ -30,7 +30,7 @@ def validate_input(file_arg: str) -> Path:
 def check_ffmpeg() -> None:
     try:
         subprocess.run(["ffmpeg", "-version"], capture_output=True)
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         print(
             "Error: ffmpeg not found. Install it:\n"
             "  brew install ffmpeg\n"
@@ -59,7 +59,11 @@ def compress_audio(input_path: Path, output_dir: Path) -> Path:
         str(output_path),
     ]
     print(f"  Compressing: {input_path} -> {output_path}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        print("Error: ffmpeg timed out (300s)", file=sys.stderr)
+        sys.exit(1)
     if result.returncode != 0:
         print(f"Error: ffmpeg failed:\n{result.stderr}", file=sys.stderr)
         sys.exit(1)
