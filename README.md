@@ -124,7 +124,7 @@ output/
 
 ## Viewer (karaoke-style)
 
-Visual verification tool that highlights words in sync with audio playback.
+Transcription verification and correction tool that highlights words in sync with audio playback.
 
 ```
 cd viewer
@@ -132,9 +132,14 @@ pnpm dev
 # open http://localhost:5173
 ```
 
-- **Word-level highlighting** — current word is highlighted in yellow as audio plays
-- **Click to seek** — click any word to jump playback to that position
+- **Word-level highlighting** — current word highlighted in emerald, past words dimmed
+- **Inline editing** — double-click any word to correct transcription errors
+  - Press **Enter** or **blur** to save (auto-persists to JSON file on disk)
+  - Press **Escape** to cancel
+- **Click to seek** — single-click any word to jump playback to that position
 - **Auto-discovery** — dropdown lists all processed recordings from `output/`
+- **URL state** — selected recording persists in `?recording=` query param on refresh
+- **Range request support** — audio seeking works via HTTP Range headers
 
 ## Pipeline
 
