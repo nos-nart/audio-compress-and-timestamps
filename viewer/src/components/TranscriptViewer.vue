@@ -119,9 +119,8 @@ function onDblClickWord(i: number) {
   startEdit(i)
 }
 
-function onEditKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter') { e.preventDefault(); commitEdit() }
-  if (e.key === 'Escape') { e.preventDefault(); cancelEdit() }
+function onInput(e: Event) {
+  editText.value = (e.target as HTMLInputElement).value
 }
 </script>
 
@@ -142,10 +141,12 @@ function onEditKeydown(e: KeyboardEvent) {
         <input
           v-else
           :id="`edit-${i}`"
-          v-model="editText"
+          :value="editText"
+          @input="onInput"
           :size="Math.max(editText.length + 2, 5)"
           @blur="commitEdit"
-          @keydown="onEditKeydown"
+          @keydown.enter.prevent="commitEdit"
+          @keydown.escape.prevent="cancelEdit"
           class="outline-none border-b-2 border-emerald-500 bg-transparent text-emerald-600 dark:text-emerald-400 font-sans text-lg"
           style="font-family:var(--font-ui)"
         />
